@@ -1,0 +1,18 @@
+.Polaris-Page {
+        padding:0px;
+    }
+.Polaris-Page__Content {
+    padding-top: var(--p-space-300);
+}
+.Polaris-Box {
+    padding: var(--p-space-150);
+}
+.Polaris-IndexTable__TableCell:not(.Polaris-IndexTable__TableCell--flush){
+    padding: 5px;
+}
+.Polaris-Select__Input{
+line-height: 1.5rem;
+}
+.link-text:hover {
+  text-decoration: underline !important;
+}
