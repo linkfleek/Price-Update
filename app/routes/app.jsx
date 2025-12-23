@@ -4,6 +4,8 @@ import { AppProvider as ShopifyAppProvider } from "@shopify/shopify-app-react-ro
 import { AppProvider as PolarisProvider } from "@shopify/polaris";
 import enTranslations from "@shopify/polaris/locales/en.json";
 import { authenticate } from "../shopify.server";
+import { useEffect } from "react";
+
 
 export const loader = async ({ request }) => {
   await authenticate.admin(request);
@@ -14,17 +16,29 @@ export const loader = async ({ request }) => {
 
 export default function App() {
   const { apiKey } = useLoaderData();
+    useEffect(() => {
+    const timer = setInterval(() => {
+      fetch("/api/schedules/run", {
+        method: "POST",
+        credentials: "include",
+      }).catch(() => {});
+    }, 30000); // every 30 seconds
+
+    return () => clearInterval(timer);
+  }, []);
 
   return (
-    <ShopifyAppProvider embedded apiKey={apiKey}>
-      <PolarisProvider i18n={enTranslations}>
-        <s-app-nav>
-          <s-link href="/app">Home</s-link>
-          <s-link href="/app/products">Products</s-link>
-        </s-app-nav>
-        <Outlet />
-      </PolarisProvider>
-    </ShopifyAppProvider>
+<ShopifyAppProvider embedded apiKey={apiKey}>
+  <PolarisProvider i18n={enTranslations}>
+    <s-app-nav>
+      <s-link href="/app">Home</s-link>
+      <s-link href="/app/products">Products</s-link>
+      <s-link href="/app/inventory">Inventory</s-link> 
+    </s-app-nav>
+    <Outlet />
+  </PolarisProvider>
+</ShopifyAppProvider>
+
   );
 }
 

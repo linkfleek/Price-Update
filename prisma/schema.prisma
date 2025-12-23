@@ -14,21 +14,49 @@ datasource db {
 }
 
 model Session {
-  id            String    @id
-  shop          String
-  state         String
-  isOnline      Boolean   @default(false)
-  scope         String?
-  expires       DateTime?
-  accessToken   String
-  userId        BigInt?
-  firstName     String?
-  lastName      String?
-  email         String?
-  accountOwner  Boolean   @default(false)
-  locale        String?
-  collaborator  Boolean?  @default(false)
-  emailVerified Boolean?  @default(false)
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
+}
+
+model PriceSchedule {
+  id        String    @id @default(cuid())
+  shop      String
+  status    String    @default("PENDING")
+  runAt     DateTime
+  revertAt  DateTime?
+  payload   Json
+  error     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  items PriceScheduleItem[]
+}
+
+model PriceScheduleItem {
+  id         String        @id @default(cuid())
+  scheduleId String
+  schedule   PriceSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  productId    String
+  variantId    String
+  newPrice     String?
+  newCompareAt String?
+
+  oldPrice     String?
+  oldCompareAt String?
 }

@@ -1,4 +1,3 @@
-
 import { Thumbnail } from "@shopify/polaris";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
@@ -18,13 +17,38 @@ import {
   Layout,
   Spinner,
   IndexTable,
+  // ✅ schedule modal imports
+  Modal,
+  RadioButton,
+  Checkbox,
+  Popover,
+  DatePicker,
 } from "@shopify/polaris";
-
 
 function money(n) {
   const v = Number(n);
   if (!Number.isFinite(v)) return "—";
   return `$${v.toFixed(2)}`;
+}
+
+// ---------- helpers for schedule ----------
+function formatYmd(date) {
+  // YYYY-MM-DD
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+function toLocalDatetimeIso(dateObj, timeStr) {
+  // dateObj = Date (date), timeStr = "HH:MM"
+  if (!dateObj || !timeStr) return null;
+
+  const [hh, mm] = timeStr.split(":").map((n) => Number(n));
+  const d = new Date(dateObj);
+
+  d.setHours(hh || 0, mm || 0, 0, 0);
+
+  return d.toISOString(); // 👈 THIS LINE
 }
 
 export default function BulkEditPage() {
@@ -56,7 +80,7 @@ export default function BulkEditPage() {
   // preview (right side)
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewErr, setPreviewErr] = useState("");
-  const [previewData, setPreviewData] = useState([]); // [{productId,title,variants:[...]}]
+  const [previewData, setPreviewData] = useState([]); // [{productId,title,image,variants:[...]}]
   const debounceRef = useRef(null);
 
   const helperText = useMemo(() => {
@@ -65,6 +89,97 @@ export default function BulkEditPage() {
     }
     return `${adjustType === "increase" ? "Increase" : "Decrease"} by $${fixedAmount || 0}`;
   }, [amountType, adjustType, percentage, fixedAmount]);
+
+  // =======================
+  // ✅ PRICE SCHEDULE STATE
+  // =======================
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+
+  // "now" or "later"
+  const [changeMode, setChangeMode] = useState("now");
+  const [revertEnabled, setRevertEnabled] = useState(false);
+
+  // FROM date/time
+  const [fromPopoverOpen, setFromPopoverOpen] = useState(false);
+  const [fromDate, setFromDate] = useState(new Date());
+  const [fromMonth, setFromMonth] = useState(fromDate.getMonth());
+  const [fromYear, setFromYear] = useState(fromDate.getFullYear());
+  const [fromTime, setFromTime] = useState("12:00");
+
+  // TO date/time
+  const [toPopoverOpen, setToPopoverOpen] = useState(false);
+  const [toDate, setToDate] = useState(new Date());
+  const [toMonth, setToMonth] = useState(toDate.getMonth());
+  const [toYear, setToYear] = useState(toDate.getFullYear());
+  const [toTime, setToTime] = useState("12:00");
+
+  // Saved schedule snapshot (used on Submit)
+  const [savedSchedule, setSavedSchedule] = useState(null);
+
+  const scheduleSummary = useMemo(() => {
+    if (!savedSchedule) return "Not set";
+    if (savedSchedule.changeMode === "now") return "Change prices now";
+    const from = `${savedSchedule.fromDate} ${savedSchedule.fromTime}`;
+    const to = savedSchedule.revertEnabled
+      ? ` → Revert ${savedSchedule.toDate} ${savedSchedule.toTime}`
+      : "";
+    return `Change later: ${from}${to}`;
+  }, [savedSchedule]);
+
+  const openSchedule = useCallback(() => setScheduleModalOpen(true), []);
+  const closeSchedule = useCallback(() => setScheduleModalOpen(false), []);
+
+  const onFromMonthChange = useCallback((m, y) => {
+    setFromMonth(m);
+    setFromYear(y);
+  }, []);
+  const onToMonthChange = useCallback((m, y) => {
+    setToMonth(m);
+    setToYear(y);
+  }, []);
+
+  const saveScheduleSettings = useCallback(() => {
+    const snapshot = {
+      changeMode,
+      revertEnabled,
+      fromDate: formatYmd(fromDate),
+      fromTime,
+      toDate: formatYmd(toDate),
+      toTime,
+      runAtIso: changeMode === "later" ? toLocalDatetimeIso(fromDate, fromTime) : null,
+      revertAtIso:
+        changeMode === "later" && revertEnabled ? toLocalDatetimeIso(toDate, toTime) : null,
+    };
+
+    // basic validations
+    if (snapshot.changeMode === "later" && !snapshot.runAtIso) {
+      setTone("critical");
+      setMsg("Please select a valid From date/time.");
+      return;
+    }
+    if (snapshot.changeMode === "later" && snapshot.revertEnabled && !snapshot.revertAtIso) {
+      setTone("critical");
+      setMsg("Please select a valid To date/time.");
+      return;
+    }
+
+    // OPTIONAL: ensure To > From when revert enabled
+    if (snapshot.changeMode === "later" && snapshot.revertEnabled) {
+      const a = new Date(snapshot.runAtIso).getTime();
+      const b = new Date(snapshot.revertAtIso).getTime();
+      if (b <= a) {
+        setTone("critical");
+        setMsg("To date/time must be after From date/time.");
+        return;
+      }
+    }
+
+    setSavedSchedule(snapshot);
+    setScheduleModalOpen(false);
+
+    setTone("success");
+    setMsg(`Schedule saved: ${snapshot.changeMode === "now" ? "Now" : "Later"}`);
+  }, [changeMode, revertEnabled, fromDate, fromTime, toDate, toTime]);
 
   // -------- Preview loader (debounced) --------
   useEffect(() => {
@@ -110,37 +225,38 @@ export default function BulkEditPage() {
     };
   }, [productIds, adjustType, amountType, percentage, fixedAmount, rounding]);
 
-  // -------- Preview summary --------
-const flatRows = useMemo(() => {
-  const rows = [];
 
-  for (const p of previewData) {
-    // ✅ API returns p.image (NOT p.featuredImage)
-    const productImageUrl = p?.image?.url || null;
-    const productImageAlt = p?.image?.altText || p?.title || "Product";
 
-    for (const v of p.variants || []) {
-      // ✅ API returns v.image (correct)
-      const variantImageUrl = v?.image?.url || null;
-      const variantImageAlt = v?.image?.altText || v?.variantTitle || "Variant";
 
-      const imageUrl = variantImageUrl || productImageUrl || null;
-      const imageAlt = variantImageUrl ? variantImageAlt : productImageAlt;
+  // -------- Flatten preview for table --------
+  const flatRows = useMemo(() => {
+    const rows = [];
 
-      rows.push({
-        productTitle: p.title,
-        variantTitle: v.variantTitle,
-        imageUrl,
-        imageAlt,
-        // ✅ API returns oldPrice (NOT v.price)
-        oldPrice: v.oldPrice,
-        newPrice: v.newPrice,
-      });
+    for (const p of previewData) {
+      const productImageUrl = p?.image?.url || null;
+      const productImageAlt = p?.image?.altText || p?.title || "Product";
+
+      for (const v of p.variants || []) {
+        const variantImageUrl = v?.image?.url || null;
+        const variantImageAlt = v?.image?.altText || v?.variantTitle || "Variant";
+
+        const imageUrl = variantImageUrl || productImageUrl || null;
+        const imageAlt = variantImageUrl ? variantImageAlt : productImageAlt;
+
+        rows.push({
+          productTitle: p.title,
+          variantTitle: v.variantTitle,
+          variantId: v.variantId || v.id, 
+          imageUrl,
+          imageAlt,
+          oldPrice: v.oldPrice,
+          newPrice: v.newPrice,
+        });
+      }
     }
-  }
 
-  return rows;
-}, [previewData]);
+    return rows;
+  }, [previewData]);
 
   const summary = useMemo(() => {
     if (!flatRows.length) return null;
@@ -150,24 +266,58 @@ const flatRows = useMemo(() => {
     return { oldTotal, newTotal, diff };
   }, [flatRows]);
 
-  // -------- Submit (actual update) --------
-  const onSubmit = useCallback(async () => {
-    if (!productIds.length) return;
+  // -------- Submit (actual update OR schedule) --------
+const onSubmit = useCallback(async () => {
+  if (!productIds.length) return;
 
-    setBusy(true);
-    setMsg("");
+  setBusy(true);
+  setMsg("");
 
-    try {
-      const payload = {
-        productIds,
-        adjustType,
-        amountType,
-        percentage: amountType === "percentage" ? Number(percentage) : null,
-        fixedAmount: amountType === "fixed" ? Number(fixedAmount || 0) : null,
-        rounding,
-      };
+  try {
+    // ✅ Build items from previewData (required for scheduling)
+    const items = [];
+    for (const p of previewData || []) {
+      for (const v of p?.variants || []) {
+        const variantId = v?.variantId;      // must be gid://shopify/ProductVariant/...
+        const newPrice = v?.newPrice;
 
-      const res = await fetch("/api/products/bulk-price-adjust", {
+        if (!variantId || newPrice == null) continue;
+
+        items.push({
+          productId: p?.productId || null,  // optional but useful
+          variantId,
+          newPrice: String(newPrice),
+          oldPrice: v?.oldPrice != null ? String(v.oldPrice) : null,
+        });
+      }
+    }
+
+    const payload = {
+      productIds,
+      adjustType,
+      amountType,
+      percentage: amountType === "percentage" ? Number(percentage) : null,
+      fixedAmount: amountType === "fixed" ? Number(fixedAmount || 0) : null,
+      rounding,
+      schedule: savedSchedule, // ✅ attach schedule
+ // ✅ add items for schedule execution
+      items: flatRows.map(r => ({
+        variantId: r.variantId,
+        newPrice: String(r.newPrice),
+        oldPrice: String(r.oldPrice ?? ""),
+      })),
+        };
+
+    // ✅ If scheduled
+    if (savedSchedule?.changeMode === "later") {
+      // Guard: prevent scheduling if items missing
+      if (!items.length) {
+        setTone("critical");
+        setMsg("items required (variantId + newPrice). Preview data missing variantId/newPrice.");
+        return;
+      }
+
+      const res = await fetch("/api/schedules/create", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -176,18 +326,49 @@ const flatRows = useMemo(() => {
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data?.ok === false) {
-        throw new Error(data?.message || "Bulk price update failed");
+        throw new Error(
+          data?.details
+            ? `${data.error}\n${data.details}`
+            : data?.error || data?.message || "Schedule create failed"
+        );
       }
 
       setTone("success");
-      setMsg(`Price update completed for ${productIds.length} product(s).`);
-    } catch (e) {
-      setTone("critical");
-      setMsg(e?.message || "Something went wrong");
-    } finally {
-      setBusy(false);
+      setMsg(`Schedule created successfully. Schedule ID: ${data.scheduleId || "—"}`);
+      return;
     }
-  }, [productIds, adjustType, amountType, percentage, fixedAmount, rounding]);
+
+    // ✅ Otherwise apply immediately
+    const res = await fetch("/api/products/bulk-price-adjust", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data?.ok === false) {
+      throw new Error(data?.message || "Bulk price update failed");
+    }
+
+    setTone("success");
+    setMsg(`Price update completed for ${productIds.length} product(s).`);
+  } catch (e) {
+    setTone("critical");
+    setMsg(e?.message || "Something went wrong");
+  } finally {
+    setBusy(false);
+  }
+}, [
+  productIds,
+  adjustType,
+  amountType,
+  percentage,
+  fixedAmount,
+  rounding,
+  savedSchedule,
+  previewData, // ✅ IMPORTANT dependency
+]);
 
   // Guard message if no ids
   useEffect(() => {
@@ -207,12 +388,10 @@ const flatRows = useMemo(() => {
         loading: busy,
         disabled: !productIds.length,
       }}
+      // ✅ Price Schedule beside Cancel (left of it)
       secondaryActions={[
-        {
-          content: "Cancel",
-          onAction: () => navigate(-1),
-          disabled: busy,
-        },
+        { content: "Price Schedule", onAction: openSchedule, disabled: busy },
+        { content: "Cancel", onAction: () => navigate(-1), disabled: busy },
       ]}
     >
       {msg ? (
@@ -228,9 +407,16 @@ const flatRows = useMemo(() => {
         <Layout.Section>
           <Card>
             <Box padding="400">
-              <Text variant="headingLg" as="h2">
-                Adjustment
-              </Text>
+              <Box paddingBlockStart="100">
+                <InlineStack align="space-between">
+                  <Text as="p" tone="subdued">
+                    Schedule: <b>{scheduleSummary}</b>
+                  </Text>
+                  <Button onClick={openSchedule} disabled={busy}>
+                    Edit schedule
+                  </Button>
+                </InlineStack>
+              </Box>
 
               <Box paddingBlockStart="400">
                 <Text variant="headingMd" as="h3">
@@ -341,7 +527,8 @@ const flatRows = useMemo(() => {
                 </Text>
                 <Box paddingBlockStart="200">
                   <Text as="p" tone="subdued">
-                    Selected IDs: <span style={{ wordBreak: "break-word" }}>{productIds.join(", ")}</span>
+                    Selected IDs:{" "}
+                    <span style={{ wordBreak: "break-word" }}>{productIds.join(", ")}</span>
                   </Text>
                 </Box>
               </Box>
@@ -350,114 +537,243 @@ const flatRows = useMemo(() => {
         </Layout.Section>
 
         {/* RIGHT PREVIEW CARD */}
-<Layout.Section variant="oneThird">
-  <Card>
-    <Box padding="400">
-      <Text variant="headingMd" as="h3">
-        Price Preview
-      </Text>
+        <Layout.Section variant="oneThird">
+          <Card>
+            <Box padding="400">
+              <Text variant="headingMd" as="h3">
+                Price Preview
+              </Text>
 
-      <Box paddingBlockStart="200">
-        <Text as="p" tone="subdued">
-          Shows the first 100 variants per product.
-        </Text>
-      </Box>
+              <Box paddingBlockStart="200">
+                <Text as="p" tone="subdued">
+                  Shows the first 100 variants per product.
+                </Text>
+              </Box>
 
-      {previewErr ? (
-        <Box paddingBlockStart="300">
-          <Banner title="Preview error" tone="critical">
-            <p>{previewErr}</p>
-          </Banner>
-        </Box>
-      ) : null}
+              {previewErr ? (
+                <Box paddingBlockStart="300">
+                  <Banner title="Preview error" tone="critical">
+                    <p>{previewErr}</p>
+                  </Banner>
+                </Box>
+              ) : null}
 
-      {previewBusy ? (
-        <Box paddingBlockStart="300">
-          <InlineStack gap="200" blockAlign="center">
-            <Spinner size="small" accessibilityLabel="Loading preview" />
-            <Text as="span" tone="subdued">
-              Calculating preview…
-            </Text>
-          </InlineStack>
-        </Box>
-      ) : null}
+              {previewBusy ? (
+                <Box paddingBlockStart="300">
+                  <InlineStack gap="200" blockAlign="center">
+                    <Spinner size="small" accessibilityLabel="Loading preview" />
+                    <Text as="span" tone="subdued">
+                      Calculating preview…
+                    </Text>
+                  </InlineStack>
+                </Box>
+              ) : null}
 
-      {!previewBusy && summary ? (
-        <Box paddingBlockStart="300">
-          <Text as="p">
-            Current total: <b>{money(summary.oldTotal)}</b>
-          </Text>
-          <Text as="p">
-            New total: <b>{money(summary.newTotal)}</b>
-          </Text>
-          <Text as="p" tone={summary.diff >= 0 ? "success" : "critical"}>
-            Difference: <b>{money(summary.diff)}</b>
-          </Text>
-        </Box>
-      ) : null}
+              {!previewBusy && summary ? (
+                <Box paddingBlockStart="300">
+                  <Text as="p">
+                    Current total: <b>{money(summary.oldTotal)}</b>
+                  </Text>
+                  <Text as="p">
+                    New total: <b>{money(summary.newTotal)}</b>
+                  </Text>
+                  <Text as="p" tone={summary.diff >= 0 ? "success" : "critical"}>
+                    Difference: <b>{money(summary.diff)}</b>
+                  </Text>
+                </Box>
+              ) : null}
 
-      <Box paddingBlockStart="300">
-        <Divider />
-      </Box>
+              <Box paddingBlockStart="300">
+                <Divider />
+              </Box>
 
-      <Box paddingBlockStart="300">
-        {!previewBusy && !flatRows.length ? (
-          <Text as="p" tone="subdued">
-            No preview data available.
-          </Text>
-        ) : null}
+              <Box paddingBlockStart="300">
+                {!previewBusy && !flatRows.length ? (
+                  <Text as="p" tone="subdued">
+                    No preview data available.
+                  </Text>
+                ) : null}
 
-        {!previewBusy && flatRows.length ? (
-          <IndexTable
-            resourceName={{ singular: "variant", plural: "variants" }}
-            itemCount={Math.min(flatRows.length, 25)}
-            selectable={false}
-            headings={[
-              { title: "Variant" },
-              { title: "Old" },
-              { title: "New" },
-            ]}
-          >
-            {flatRows.slice(0, 25).map((r, idx) => (
-              <IndexTable.Row id={`${idx}`} key={`${idx}`} position={idx}>
-                {/* ✅ Variant column WITH IMAGE */}
-                <IndexTable.Cell>
-                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    {r.imageUrl ? (
-                      <Thumbnail source={r.imageUrl} alt={r.imageAlt} size="small" />
-                    ) : null}
+                {!previewBusy && flatRows.length ? (
+                  <IndexTable
+                    resourceName={{ singular: "variant", plural: "variants" }}
+                    itemCount={Math.min(flatRows.length, 25)}
+                    selectable={false}
+                    headings={[{ title: "Variant" }, { title: "Old" }, { title: "New" }]}
+                  >
+                    {flatRows.slice(0, 25).map((r, idx) => (
+                      <IndexTable.Row id={`${idx}`} key={`${idx}`} position={idx}>
+                        <IndexTable.Cell>
+                          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                            {r.imageUrl ? (
+                              <Thumbnail source={r.imageUrl} alt={r.imageAlt} size="small" />
+                            ) : null}
 
-                    <div>
-                      <Text as="p" variant="bodySm">
-                        <b>{r.productTitle}</b>
-                      </Text>
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        {r.variantTitle}
-                      </Text>
-                    </div>
-                  </div>
-                </IndexTable.Cell>
+                            <div>
+                              <Text as="p" variant="bodySm">
+                                <b>{r.productTitle}</b>
+                              </Text>
+                              <Text as="p" variant="bodySm" tone="subdued">
+                                {r.variantTitle}
+                              </Text>
+                            </div>
+                          </div>
+                        </IndexTable.Cell>
 
-                <IndexTable.Cell>{money(r.oldPrice)}</IndexTable.Cell>
-                <IndexTable.Cell>{money(r.newPrice)}</IndexTable.Cell>
-              </IndexTable.Row>
-            ))}
-          </IndexTable>
-        ) : null}
+                        <IndexTable.Cell>{money(r.oldPrice)}</IndexTable.Cell>
+                        <IndexTable.Cell>{money(r.newPrice)}</IndexTable.Cell>
+                      </IndexTable.Row>
+                    ))}
+                  </IndexTable>
+                ) : null}
 
-        {!previewBusy && flatRows.length > 25 ? (
-          <Box paddingBlockStart="200">
+                {!previewBusy && flatRows.length > 25 ? (
+                  <Box paddingBlockStart="200">
+                    <Text as="p" tone="subdued">
+                      Showing 25 of {flatRows.length} variants in preview.
+                    </Text>
+                  </Box>
+                ) : null}
+              </Box>
+            </Box>
+          </Card>
+        </Layout.Section>
+      </Layout>
+
+      {/* =======================
+          ✅ PRICE SCHEDULE MODAL
+         ======================= */}
+      <Modal
+        open={scheduleModalOpen}
+        onClose={closeSchedule}
+        title="Price Schedule"
+        primaryAction={{ content: "Save", onAction: saveScheduleSettings }}
+        secondaryActions={[{ content: "Close", onAction: closeSchedule }]}
+      >
+        <Modal.Section>
+          <Box paddingBlockEnd="200">
             <Text as="p" tone="subdued">
-              Showing 25 of {flatRows.length} variants in preview.
+              Select when the prices should change
             </Text>
           </Box>
-        ) : null}
-      </Box>
-    </Box>
-  </Card>
-</Layout.Section>
 
-      </Layout>
+          <InlineStack gap="500" align="space-between">
+            <RadioButton
+              label="Change prices now"
+              checked={changeMode === "now"}
+              id="change_now"
+              name="changeMode"
+              onChange={() => setChangeMode("now")}
+            />
+            <RadioButton
+              label="Change prices later"
+              checked={changeMode === "later"}
+              id="change_later"
+              name="changeMode"
+              onChange={() => setChangeMode("later")}
+            />
+          </InlineStack>
+
+          {changeMode === "later" ? (
+            <Box paddingBlockStart="400">
+              <Divider />
+
+              {/* FROM */}
+              <Box paddingBlockStart="400">
+                <InlineStack gap="300" align="start">
+                  <div style={{ flex: 1 }}>
+                    <Popover
+                      active={fromPopoverOpen}
+                      onClose={() => setFromPopoverOpen(false)}
+                      activator={
+                        <TextField
+                          label="From date"
+                          value={formatYmd(fromDate)}
+                          onFocus={() => setFromPopoverOpen(true)}
+                          autoComplete="off"
+                        />
+                      }
+                    >
+                      <DatePicker
+                        month={fromMonth}
+                        year={fromYear}
+                        onMonthChange={onFromMonthChange}
+                        selected={fromDate}
+                        onChange={({ start }) => {
+                          setFromDate(start);
+                          setFromPopoverOpen(false);
+                        }}
+                      />
+                    </Popover>
+                  </div>
+
+                  <div style={{ width: 180 }}>
+                    <TextField
+                      label="From time"
+                      type="time"
+                      value={fromTime}
+                      onChange={setFromTime}
+                      autoComplete="off"
+                    />
+                  </div>
+                </InlineStack>
+              </Box>
+
+              {/* REVERT */}
+              <Box paddingBlockStart="300">
+                <Checkbox
+                  label="Revert to original prices later?"
+                  checked={revertEnabled}
+                  onChange={setRevertEnabled}
+                />
+              </Box>
+
+              {/* TO */}
+              {revertEnabled ? (
+                <Box paddingBlockStart="300">
+                  <InlineStack gap="300" align="start">
+                    <div style={{ flex: 1 }}>
+                      <Popover
+                        active={toPopoverOpen}
+                        onClose={() => setToPopoverOpen(false)}
+                        activator={
+                          <TextField
+                            label="To date"
+                            value={formatYmd(toDate)}
+                            onFocus={() => setToPopoverOpen(true)}
+                            autoComplete="off"
+                          />
+                        }
+                      >
+                        <DatePicker
+                          month={toMonth}
+                          year={toYear}
+                          onMonthChange={onToMonthChange}
+                          selected={toDate}
+                          onChange={({ start }) => {
+                            setToDate(start);
+                            setToPopoverOpen(false);
+                          }}
+                        />
+                      </Popover>
+                    </div>
+
+                    <div style={{ width: 180 }}>
+                      <TextField
+                        label="To time"
+                        type="time"
+                        value={toTime}
+                        onChange={setToTime}
+                        autoComplete="off"
+                      />
+                    </div>
+                  </InlineStack>
+                </Box>
+              ) : null}
+            </Box>
+          ) : null}
+        </Modal.Section>
+      </Modal>
     </Page>
   );
 }
