@@ -1,4 +1,3 @@
-// app/routes/app.inventory.jsx
 import { Thumbnail } from "@shopify/polaris";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import {
@@ -15,8 +14,8 @@ import {
   Button,
   InlineStack,
   Divider,
-//   ButtonGroup,
   Badge,
+  useIndexResourceState,
 } from "@shopify/polaris";
 
 function num(val, fallback = 0) {
@@ -33,35 +32,18 @@ export default function InventoryPage() {
   const [locationId, setLocationId] = useState("");
 
   const [products, setProducts] = useState([]);
-  const [rows, setRows] = useState([]); // flattened
+  const [rows, setRows] = useState([]); 
 
   const [loadingLevels, setLoadingLevels] = useState(false);
 
-  // Search + Sort
+  
   const [query, setQuery] = useState("");
   const [sortValue, setSortValue] = useState("product_asc");
 
-  // Track edits (rowKey -> { available?, onHand? })
+  
   const [edited, setEdited] = useState({});
 
-  // Selection state (IndexTable)
-  const [selectedResources, setSelectedResources] = useState([]);
-  const allResourceIds = useMemo(() => rows.map((r) => r.key), [rows]);
-
-  const handleSelectionChange = useCallback(
-    (selectionType, toggleType, selection) => {
-      if (selectionType === "all") {
-        setSelectedResources(toggleType ? allResourceIds : []);
-      } else {
-        setSelectedResources(selection);
-      }
-    },
-    [allResourceIds]
-  );
-
-  const selectedCount = selectedResources.length;
-
-  // -------- Load locations + products ----------
+  
   useEffect(() => {
     (async () => {
       setBusy(true);
@@ -76,10 +58,12 @@ export default function InventoryPage() {
         const locJson = await locRes.json().catch(() => ({}));
         const prodJson = await prodRes.json().catch(() => ({}));
 
-        if (!locRes.ok || locJson?.ok === false)
+        if (!locRes.ok || locJson?.ok === false) {
           throw new Error(locJson?.error || "Failed to load locations");
-        if (!prodRes.ok || prodJson?.ok === false)
+        }
+        if (!prodRes.ok || prodJson?.ok === false) {
           throw new Error(prodJson?.error || "Failed to load products");
+        }
 
         setLocations(locJson.locations || []);
         const defaultLoc = locJson.locations?.[0]?.id || "";
@@ -95,24 +79,29 @@ export default function InventoryPage() {
     })();
   }, []);
 
-  // -------- Flatten products into table rows ----------
+  
   useEffect(() => {
     const out = [];
+
     for (const p of products) {
       const pImg = p?.featuredImage?.url || null;
       const pAlt = p?.featuredImage?.altText || p?.title || "Product";
 
       for (const v of p?.variants?.nodes || []) {
+        const rowId = v?.inventoryItem?.id || v?.id; // stable id for IndexTable selection
+
         out.push({
-          key: v?.inventoryItem?.id || v?.id,
+          id: rowId,
+          key: rowId,
+
           productTitle: p?.title,
           variantTitle: v?.title,
           sku: v?.sku || "—",
           inventoryItemId: v?.inventoryItem?.id,
+
           imageUrl: pImg,
           imageAlt: pAlt,
 
-          // inventory fields
           unavailable: null,
           committed: null,
           available: null,
@@ -122,11 +111,10 @@ export default function InventoryPage() {
     }
 
     setRows(out);
-    setSelectedResources([]);
     setEdited({});
   }, [products]);
 
-  // -------- Load inventory levels for current location ----------
+  
   useEffect(() => {
     if (!locationId || !rows.length) return;
 
@@ -140,23 +128,38 @@ export default function InventoryPage() {
         const results = await Promise.all(
           slice.map(async (r) => {
             if (!r.inventoryItemId) {
-              return { id: r.key, unavailable: 0, committed: 0, available: 0, onHand: 0 };
+              return {
+                id: r.id,
+                unavailable: 0,
+                committed: 0,
+                available: 0,
+                onHand: 0,
+              };
             }
 
             const res = await fetch("/api/inventory/level", {
               method: "POST",
               credentials: "include",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ inventoryItemId: r.inventoryItemId, locationId }),
+              body: JSON.stringify({
+                inventoryItemId: r.inventoryItemId,
+                locationId,
+              }),
             });
 
             const json = await res.json().catch(() => ({}));
             if (!res.ok || json?.ok === false) {
-              return { id: r.key, unavailable: 0, committed: 0, available: 0, onHand: 0 };
+              return {
+                id: r.id,
+                unavailable: 0,
+                committed: 0,
+                available: 0,
+                onHand: 0,
+              };
             }
 
             return {
-              id: r.key,
+              id: r.id,
               unavailable: num(json.unavailable, 0),
               committed: num(json.committed, 0),
               available: num(json.available, 0),
@@ -168,7 +171,7 @@ export default function InventoryPage() {
         const map = new Map(results.map((x) => [x.id, x]));
         setRows((prev) =>
           prev.map((r) => {
-            const hit = map.get(r.key);
+            const hit = map.get(r.id);
             if (!hit) return r;
             return {
               ...r,
@@ -181,7 +184,6 @@ export default function InventoryPage() {
         );
 
         setEdited({});
-        setSelectedResources([]);
       } catch (e) {
         setTone("critical");
         setMsg(e?.message || "Inventory load error");
@@ -191,33 +193,24 @@ export default function InventoryPage() {
     })();
   }, [locationId, rows.length]);
 
-  const locationOptions = useMemo(() => {
-    return (locations || []).map((l) => ({ label: l.name, value: l.id }));
-  }, [locations]);
+  const locationOptions = useMemo(
+    () => (locations || []).map((l) => ({ label: l.name, value: l.id })),
+    [locations]
+  );
 
   const sortOptions = useMemo(
     () => [
       { label: "Sort: Product (A–Z)", value: "product_asc" },
       { label: "Sort: Product (Z–A)", value: "product_desc" },
-      { label: "Sort: Available (low → high)", value: "available_asc" },
-      { label: "Sort: Available (high → low)", value: "available_desc" },
-      { label: "Sort: On hand (low → high)", value: "onhand_asc" },
-      { label: "Sort: On hand (high → low)", value: "onhand_desc" },
+      { label: "Sort: Available (low to high)", value: "available_asc" },
+      { label: "Sort: Available (high to low)", value: "available_desc" },
+      { label: "Sort: On hand (low to high)", value: "onhand_asc" },
+      { label: "Sort: On hand (high to low)", value: "onhand_desc" },
     ],
     []
   );
 
-  const onEditQty = useCallback((rowKey, field, val) => {
-    setEdited((prev) => ({
-      ...prev,
-      [rowKey]: {
-        ...(prev[rowKey] || {}),
-        [field]: val,
-      },
-    }));
-  }, []);
-
-  // Filter + Sort + limit to first 50
+  
   const visibleRows = useMemo(() => {
     let list = rows.slice(0, 50);
 
@@ -261,39 +254,57 @@ export default function InventoryPage() {
     return sorted;
   }, [rows, query, sortValue]);
 
-  // -------- Save single row ----------
+  
+  const {
+    selectedResources,
+    allResourcesSelected,
+    handleSelectionChange,
+    clearSelection,
+  } = useIndexResourceState(visibleRows);
+
+  const selectedItemsCount = allResourcesSelected ? "All" : selectedResources.length;
+
+  
+  const onEditQty = useCallback((rowId, val) => {
+    setEdited((prev) => ({
+      ...prev,
+      [rowId]: val,
+    }));
+  }, []);
+
+  
   const saveRow = useCallback(
     async (row) => {
       try {
-        const patch = edited[row.key];
-        if (!patch) return;
+        const newVal = edited[row.id];
+        if (newVal == null || newVal === "") return;
 
-        const availableVal = patch.available;
-
-        if (availableVal != null && availableVal !== "") {
-          const qty = Number(availableVal);
-          if (!Number.isFinite(qty) || qty < 0) throw new Error("Available must be 0 or more");
-
-          const res = await fetch("/api/inventory/update", {
-            method: "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              inventoryItemId: row.inventoryItemId,
-              locationId,
-              quantity: qty,
-            }),
-          });
-
-          const json = await res.json().catch(() => ({}));
-          if (!res.ok || json?.ok === false) throw new Error(json?.error || "Update failed");
-
-          setRows((prev) => prev.map((r) => (r.key === row.key ? { ...r, available: qty } : r)));
+        const qty = Number(newVal);
+        if (!Number.isFinite(qty) || qty < 0) {
+          throw new Error("Quantity must be a valid number (0 or more)");
         }
+
+        const res = await fetch("/api/inventory/update", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            inventoryItemId: row.inventoryItemId,
+            locationId,
+            quantity: qty,
+          }),
+        });
+
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || json?.ok === false) {
+          throw new Error(json?.error || "Update failed");
+        }
+
+        setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, available: qty } : r)));
 
         setEdited((prev) => {
           const copy = { ...prev };
-          delete copy[row.key];
+          delete copy[row.id];
           return copy;
         });
 
@@ -307,7 +318,7 @@ export default function InventoryPage() {
     [edited, locationId]
   );
 
-  // -------- Bulk Save (selected rows first; if none selected -> all edited) ----------
+  
   const saveAll = useCallback(async () => {
     try {
       const editedKeys = Object.keys(edited);
@@ -317,29 +328,32 @@ export default function InventoryPage() {
         return;
       }
 
-      const targetKeys = selectedResources.length ? selectedResources : editedKeys;
+      
+      const targetIds = selectedResources.length ? selectedResources : editedKeys;
 
-      const updates = targetKeys
-        .map((k) => {
-          const row = rows.find((r) => r.key === k);
-          const patch = edited[k];
-          if (!row?.inventoryItemId || !patch) return null;
-          if (patch.available == null || patch.available === "") return null;
+      const updates = targetIds
+        .map((id) => {
+          const row = rows.find((r) => r.id === id);
+          const val = edited[id];
+          if (!row?.inventoryItemId) return null;
+          if (val == null || val === "") return null;
 
           return {
             inventoryItemId: row.inventoryItemId,
-            quantity: Number(patch.available),
+            quantity: Number(val),
           };
         })
         .filter(Boolean);
 
       if (!updates.length) {
         setTone("critical");
-        setMsg("No valid edits to save (for selected rows).");
+        setMsg("No valid changes to save.");
         return;
       }
 
-      const bad = updates.find((u) => !u.inventoryItemId || !Number.isFinite(u.quantity) || u.quantity < 0);
+      const bad = updates.find(
+        (u) => !u.inventoryItemId || !Number.isFinite(u.quantity) || u.quantity < 0
+      );
       if (bad) throw new Error("One or more edited rows have invalid quantity.");
 
       const res = await fetch("/api/inventory/update-bulk", {
@@ -352,16 +366,23 @@ export default function InventoryPage() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok || json?.ok === false) throw new Error(json?.error || "Bulk update failed");
 
-      const map = new Map(updates.map((u) => [u.inventoryItemId, u.quantity]));
+      
+      const byInvItem = new Map(updates.map((u) => [u.inventoryItemId, u.quantity]));
       setRows((prev) =>
         prev.map((r) => {
-          const v = map.get(r.inventoryItemId);
+          const v = byInvItem.get(r.inventoryItemId);
           return v == null ? r : { ...r, available: v };
         })
       );
 
-      setEdited({});
-      setSelectedResources([]);
+      
+      setEdited((prev) => {
+        const copy = { ...prev };
+        for (const id of targetIds) delete copy[id];
+        return copy;
+      });
+
+      clearSelection();
 
       setTone("success");
       setMsg(`Bulk saved successfully. Updated ${json.updated || updates.length} row(s).`);
@@ -369,10 +390,9 @@ export default function InventoryPage() {
       setTone("critical");
       setMsg(e?.message || "Bulk save failed");
     }
-  }, [edited, locationId, rows, selectedResources]);
+  }, [edited, locationId, rows, selectedResources, clearSelection]);
 
   const editedCount = Object.keys(edited).length;
-  const primaryDisabled = !locationId || editedCount === 0;
 
   return (
     <Page
@@ -380,7 +400,7 @@ export default function InventoryPage() {
       primaryAction={{
         content: "Bulk Save",
         onAction: saveAll,
-        disabled: primaryDisabled,
+        disabled: !locationId || editedCount === 0,
       }}
     >
       {msg ? (
@@ -395,18 +415,17 @@ export default function InventoryPage() {
         <Layout.Section>
           <Card>
             <Box padding="400">
-              {/* ✅ SINGLE ROW TOOLBAR (Inventory + Search + Sort + Location + Columns + Filters) */}
-              <InlineStack align="space-between" blockAlign="center" gap="300" wrap={false}>
-                <InlineStack gap="200" blockAlign="center" wrap={false}>
-                  <Text as="h2" variant="headingLg">
+              
+              <InlineStack align="space-between" blockAlign="center" gap="300">
+                <InlineStack gap="200" blockAlign="center">
+                  <Text as="h2" variant="headingMd">
                     Inventory
                   </Text>
                   {busy ? <Spinner size="small" /> : null}
                 </InlineStack>
 
                 <InlineStack gap="200" blockAlign="center" wrap={false}>
-                  {/* Search */}
-                  <Box minWidth="260px">
+                  <Box minWidth="320px">
                     <TextField
                       label="Search"
                       labelHidden
@@ -419,8 +438,7 @@ export default function InventoryPage() {
                     />
                   </Box>
 
-                  {/* Sort */}
-                  <Box minWidth="220px">
+                  <Box minWidth="280px">
                     <Select
                       label="Sort"
                       labelHidden
@@ -430,8 +448,7 @@ export default function InventoryPage() {
                     />
                   </Box>
 
-                  {/* Location */}
-                  <Box minWidth="240px">
+                  <Box minWidth="280px">
                     <Select
                       label="Shop location"
                       labelHidden
@@ -441,24 +458,18 @@ export default function InventoryPage() {
                       disabled={!locationOptions.length}
                     />
                   </Box>
-
-                  {/* Buttons (text only) */}
-                  {/* <ButtonGroup>
-                    <Button onClick={() => setMsg("Columns clicked (UI only).")}>Columns</Button>
-                    <Button onClick={() => setMsg("Filters clicked (UI only).")}>Filters</Button>
-                  </ButtonGroup> */}
                 </InlineStack>
               </InlineStack>
 
               <Box paddingBlockStart="300">
                 <Divider />
               </Box>
-
-              {/* Status row */}
               <Box paddingBlockStart="200">
                 <InlineStack align="space-between" blockAlign="center">
                   <InlineStack gap="200" blockAlign="center">
-                    {selectedCount ? <Badge tone="info">{selectedCount} selected</Badge> : null}
+                    {selectedItemsCount !== 0 ? (
+                      <Badge tone="info">{selectedItemsCount} selected</Badge>
+                    ) : null}
                     {editedCount ? <Badge tone="attention">{editedCount} edited</Badge> : null}
                   </InlineStack>
 
@@ -478,7 +489,7 @@ export default function InventoryPage() {
                   resourceName={{ singular: "variant", plural: "variants" }}
                   itemCount={visibleRows.length}
                   selectable
-                  selectedItemsCount={selectedResources.length}
+                  selectedItemsCount={selectedItemsCount}
                   onSelectionChange={handleSelectionChange}
                   headings={[
                     { title: "Product" },
@@ -487,32 +498,28 @@ export default function InventoryPage() {
                     { title: "Committed" },
                     { title: "Available" },
                     { title: "On hand" },
-                    { title: "" },
+                    { title: "Action" },
                   ]}
                 >
                   {visibleRows.map((r, idx) => {
-                    const patch = edited[r.key] || {};
-                    const dirtyAvailable = patch.available != null;
-                    const dirtyOnHand = patch.onHand != null;
-
+                    const editedVal = edited[r.id];
                     const displayAvailable =
-                      patch.available != null ? String(patch.available) : r.available == null ? "" : String(r.available);
+                      editedVal != null ? String(editedVal) : r.available == null ? "" : String(r.available);
 
-                    const displayOnHand =
-                      patch.onHand != null ? String(patch.onHand) : r.onHand == null ? "" : String(r.onHand);
-
-                    const dirty = dirtyAvailable || dirtyOnHand;
+                    const dirty = editedVal != null;
 
                     return (
                       <IndexTable.Row
-                        id={r.key}
-                        key={r.key}
+                        id={r.id}
+                        key={r.id}
                         position={idx}
-                        selected={selectedResources.includes(r.key)}
+                        selected={selectedResources.includes(r.id)}
                       >
                         <IndexTable.Cell>
                           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                            {r.imageUrl ? <Thumbnail source={r.imageUrl} alt={r.imageAlt} size="small" /> : null}
+                            {r.imageUrl ? (
+                              <Thumbnail source={r.imageUrl} alt={r.imageAlt} size="small" />
+                            ) : null}
                             <div>
                               <Text as="p" variant="bodySm">
                                 <b>{r.productTitle}</b>
@@ -529,34 +536,25 @@ export default function InventoryPage() {
                         <IndexTable.Cell>{num(r.committed, 0)}</IndexTable.Cell>
 
                         <IndexTable.Cell>
-                          <div style={{ maxWidth: 130 }}>
+                          <div style={{ maxWidth: 140 }}>
                             <TextField
                               labelHidden
                               label="Available"
                               type="number"
                               value={displayAvailable}
-                              onChange={(v) => onEditQty(r.key, "available", v)}
+                              onChange={(v) => onEditQty(r.id, v)}
                               autoComplete="off"
                             />
                           </div>
                         </IndexTable.Cell>
 
-                        <IndexTable.Cell>
-                          <div style={{ maxWidth: 130 }}>
-                            <TextField
-                              labelHidden
-                              label="On hand"
-                              type="number"
-                              value={displayOnHand}
-                              onChange={(v) => onEditQty(r.key, "onHand", v)}
-                              autoComplete="off"
-                              disabled
-                            />
-                          </div>
-                        </IndexTable.Cell>
+                        <IndexTable.Cell>{num(r.onHand, 0)}</IndexTable.Cell>
 
                         <IndexTable.Cell>
-                          <Button onClick={() => saveRow(r)} disabled={!dirty || !locationId || !r.inventoryItemId}>
+                          <Button
+                            onClick={() => saveRow(r)}
+                              disabled={!dirty || !locationId || !r.inventoryItemId}
+                          >
                             Save
                           </Button>
                         </IndexTable.Cell>
@@ -567,7 +565,7 @@ export default function InventoryPage() {
 
                 <Box paddingBlockStart="200">
                   <Text as="p" tone="subdued">
-                    Showing first 50 variants. (Pagination can be added next.)
+                    Showing first 50 variants.
                   </Text>
                 </Box>
               </Box>

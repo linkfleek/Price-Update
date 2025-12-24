@@ -22,7 +22,7 @@ import {
   InlineStack,
   Box,
 } from "@shopify/polaris";
-import { MenuHorizontalIcon, SearchIcon, FilterIcon } from "@shopify/polaris-icons";
+import { SearchIcon, FilterIcon } from "@shopify/polaris-icons";
 import "/app/css/app.css.products.css";
 
 function statusBadgeTone(status) {
@@ -46,25 +46,22 @@ export default function ProductsPage() {
 
   const [selectedTab, setSelectedTab] = useState(0);
 
-  // Top-right controls
+  
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("title_asc");
 
-  // Filters popover
+  
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filterStatus, setFilterStatus] = useState("ALL");
 
-  // “...” menu (in the bulk actions row)
-  const [moreOpen, setMoreOpen] = useState(false);
-
-  // Show selected toggle
+  
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
 
-  // Banner message + loading for status updates
+  
   const [statusBusy, setStatusBusy] = useState(false);
   const [bulkMsg, setBulkMsg] = useState("");
 
-  // Fetch products
+  
   useEffect(() => {
     let alive = true;
 
@@ -99,7 +96,7 @@ export default function ProductsPage() {
     };
   }, []);
 
-  // Tabs
+ 
   const tabs = useMemo(
     () => [
       { id: "all", content: "All" },
@@ -112,7 +109,7 @@ export default function ProductsPage() {
 
   const onTabChange = useCallback((index) => setSelectedTab(index), []);
 
-  // Base filter by tab
+  
   const tabFiltered = useMemo(() => {
     const tab = tabs[selectedTab]?.id;
     if (tab === "active") return products.filter((p) => p.status === "ACTIVE");
@@ -121,13 +118,13 @@ export default function ProductsPage() {
     return products;
   }, [products, selectedTab, tabs]);
 
-  // Additional filter (popover)
+  
   const statusFiltered = useMemo(() => {
     if (!filterStatus || filterStatus === "ALL") return tabFiltered;
     return tabFiltered.filter((p) => p.status === filterStatus);
   }, [tabFiltered, filterStatus]);
 
-  // Search filter
+
   const searched = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return statusFiltered;
@@ -138,7 +135,7 @@ export default function ProductsPage() {
     });
   }, [statusFiltered, query]);
 
-  // Sort
+  
   const sorted = useMemo(() => {
     const copy = [...searched];
     if (sort === "title_asc") copy.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
@@ -152,15 +149,14 @@ export default function ProductsPage() {
     return copy;
   }, [searched, sort]);
 
-  // Selection state must match the rendered list (sorted)
-  const { selectedResources, allResourcesSelected, handleSelectionChange, clearSelection } =
+  const { selectedResources, allResourcesSelected, handleSelectionChange } =
     useIndexResourceState(sorted, {
       resourceIDResolver: (p) => p.id,
     });
 
   const selectedCount = allResourcesSelected ? "All" : selectedResources.length;
 
-  // Show selected only
+  
   const visibleProducts = useMemo(() => {
     if (!showSelectedOnly) return sorted;
     if (allResourcesSelected) return sorted;
@@ -179,36 +175,13 @@ export default function ProductsPage() {
     </Button>
   );
 
-  const moreActivator = (
-    <Button
-      icon={<Icon source={MenuHorizontalIcon} />}
-      onClick={() => setMoreOpen((v) => !v)}
-      accessibilityLabel="More actions"
-    />
-  );
-
-  // ==========================
-  // Delete functionality
-  // ==========================
+ 
   const getSelectedIdsSet = useCallback(() => {
     if (allResourcesSelected) return new Set(sorted.map((p) => p.id));
     return new Set(selectedResources);
   }, [allResourcesSelected, sorted, selectedResources]);
 
-  const handleDeleteSelected = useCallback(() => {
-    const idsToDelete = getSelectedIdsSet();
-    if (idsToDelete.size === 0) return;
 
-    setProducts((prev) => prev.filter((p) => !idsToDelete.has(p.id)));
-
-    clearSelection();
-    setShowSelectedOnly(false);
-    setMoreOpen(false);
-  }, [getSelectedIdsSet, clearSelection]);
-
-  // ==========================
-  // Status change (Draft / Active)
-  // ==========================
   const selectedProducts = useMemo(() => {
     if (!showBulkBar) return [];
     const selectedSet = getSelectedIdsSet();
@@ -230,6 +203,7 @@ export default function ProductsPage() {
 
   const statusButtonEnabled = (allSelectedAreActive || allSelectedAreDraft) && !statusBusy;
 
+  
   const handleStatusChange = useCallback(async () => {
     const selectedSet = getSelectedIdsSet();
     const ids = Array.from(selectedSet);
@@ -244,7 +218,7 @@ export default function ProductsPage() {
         credentials: "include",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
-          status: nextStatus, // "ACTIVE" | "DRAFT"
+          status: nextStatus, 
           productIds: ids.map((gid) =>
             String(gid).includes("/") ? String(gid).split("/").pop() : gid
           ),
@@ -252,11 +226,25 @@ export default function ProductsPage() {
       });
 
       const data = await res.json().catch(() => ({}));
+
+      
+      const userErr =
+        Array.isArray(data?.userErrors) && data.userErrors.length
+          ? data.userErrors.map((e) => e.message).filter(Boolean).join(", ")
+          : "";
+
+      const errMsg =
+        data?.error ||
+        data?.details ||
+        userErr ||
+        data?.message || 
+        "Status update failed";
+
       if (!res.ok || data?.ok === false) {
-        throw new Error(data?.message || "Status update failed");
+        throw new Error(errMsg);
       }
 
-      // Update UI locally
+      
       setProducts((prev) =>
         prev.map((p) => {
           if (!selectedSet.has(p.id)) return p;
@@ -391,58 +379,22 @@ export default function ProductsPage() {
 
               <ButtonGroup>
                 <Button
-  onClick={() => {
-    const set = getSelectedIdsSet();
-    const ids = Array.from(set).map((gid) =>
-      String(gid).includes("/") ? String(gid).split("/").pop() : String(gid)
-    );
+                  onClick={() => {
+                    const set = getSelectedIdsSet();
+                    const ids = Array.from(set).map((gid) =>
+                      String(gid).includes("/") ? String(gid).split("/").pop() : String(gid)
+                    );
 
-    if (!ids.length) return;
-    navigate(`/app/bulk-edit?ids=${encodeURIComponent(ids.join(","))}`);
-  }}
->
-  Bulk edit
-</Button>
-
-
-                {/* Only status change button remains */}
-                <Button
-                  loading={statusBusy}
-                  disabled={!statusButtonEnabled}
-                  onClick={handleStatusChange}
+                    if (!ids.length) return;
+                    navigate(`/app/bulk-edit?ids=${encodeURIComponent(ids.join(","))}`);
+                  }}
                 >
-                  {statusLabel}
+                  Bulk edit
                 </Button>
 
-                <Popover
-                  active={moreOpen}
-                  activator={moreActivator}
-                  onClose={() => setMoreOpen(false)}
-                >
-                  <ActionList
-                    items={[
-                      {
-                        content: "Archive",
-                        onAction: () => {
-                          setMoreOpen(false);
-                          alert("Archive");
-                        },
-                      },
-                      {
-                        content: "Delete",
-                        destructive: true,
-                        onAction: handleDeleteSelected,
-                      },
-                      {
-                        content: "Clear selection",
-                        onAction: () => {
-                          setMoreOpen(false);
-                          clearSelection();
-                        },
-                      },
-                    ]}
-                  />
-                </Popover>
+                <Button loading={statusBusy} disabled={!statusButtonEnabled} onClick={handleStatusChange}>
+                  {statusLabel}
+                </Button>
               </ButtonGroup>
             </InlineStack>
           </Box>
@@ -463,8 +415,7 @@ export default function ProductsPage() {
         >
           {visibleProducts.map((p, index) => {
             const image = p.images?.nodes?.[0];
-            const category =
-              p.productCategory?.productTaxonomyNode?.fullName || "Uncategorized";
+            const category = p.productCategory?.productTaxonomyNode?.fullName || "Uncategorized";
             const invNum = typeof p.totalInventory === "number" ? p.totalInventory : null;
             const inventory = invNum === null ? "—" : `${invNum} in stock`;
             const numericId = safeNumericId(p.id);

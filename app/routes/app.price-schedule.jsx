@@ -1,3 +1,4 @@
+
 import { useState, useMemo, useCallback } from "react";
 import {
   Page,
@@ -17,16 +18,13 @@ import {
   Banner,
 } from "@shopify/polaris";
 
-// ---------- helpers ----------
 function formatYmd(date) {
-  // YYYY-MM-DD
   const yyyy = date.getFullYear();
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   const dd = String(date.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 }
 function toLocalDatetime(dateObj, timeStr) {
-  // dateObj = Date (date), timeStr = "HH:MM"
   if (!dateObj || !timeStr) return null;
   const [hh, mm] = timeStr.split(":").map((n) => Number(n));
   const d = new Date(dateObj);
@@ -35,35 +33,24 @@ function toLocalDatetime(dateObj, timeStr) {
 }
 
 export default function PriceUpdatePage() {
-  // ---------------------------------------
-  // Existing states from your page (example)
-  // ---------------------------------------
   const [submitResult, setSubmitResult] = useState(null);
-
-  // ---------------------------------------
-  // Schedule UI state
-  // ---------------------------------------
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
 
-  // Change now vs later
-  const [changeMode, setChangeMode] = useState("now"); // "now" | "later"
+  const [changeMode, setChangeMode] = useState("now"); 
   const [revertEnabled, setRevertEnabled] = useState(false);
 
-  // FROM (start)
   const [fromPopoverOpen, setFromPopoverOpen] = useState(false);
   const [fromDate, setFromDate] = useState(new Date());
   const [fromMonth, setFromMonth] = useState(fromDate.getMonth());
   const [fromYear, setFromYear] = useState(fromDate.getFullYear());
   const [fromTime, setFromTime] = useState("12:00");
 
-  // TO (end)
   const [toPopoverOpen, setToPopoverOpen] = useState(false);
   const [toDate, setToDate] = useState(new Date());
   const [toMonth, setToMonth] = useState(toDate.getMonth());
   const [toYear, setToYear] = useState(toDate.getFullYear());
   const [toTime, setToTime] = useState("12:00");
 
-  // Saved schedule snapshot (used on Submit)
   const [savedSchedule, setSavedSchedule] = useState(null);
 
   const scheduleSummary = useMemo(() => {
@@ -97,13 +84,11 @@ export default function PriceUpdatePage() {
       fromTime,
       toDate: formatYmd(toDate),
       toTime,
-      // ISO values for backend:
       runAtIso: changeMode === "later" ? toLocalDatetime(fromDate, fromTime) : null,
       revertAtIso:
         changeMode === "later" && revertEnabled ? toLocalDatetime(toDate, toTime) : null,
     };
 
-    // Basic validation
     if (snapshot.changeMode === "later" && !snapshot.runAtIso) {
       setSubmitResult({ ok: false, error: "Please select a valid start date/time." });
       return;
@@ -116,22 +101,14 @@ export default function PriceUpdatePage() {
     setSavedSchedule(snapshot);
     setScheduleModalOpen(false);
   }
-
-  // ---------------------------------------
-  // Your existing Submit handler
-  // Add schedule info into payload
-  // ---------------------------------------
   async function handleSubmit() {
     try {
-      // Example: build your existing payload here (prices, ids, rounding, etc.)
       const payload = {
-        // ...your existing payload
-        schedule: savedSchedule, // 👈 includes runAtIso + revertAtIso
+        schedule: savedSchedule, 
       };
 
-      // If changeMode == later => call your schedule endpoint instead of applying immediately
       if (savedSchedule?.changeMode === "later") {
-        // POST to your schedule creation API/route (use whichever you built)
+        
         const res = await fetch("/api/schedules/create", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -142,7 +119,7 @@ export default function PriceUpdatePage() {
         return;
       }
 
-      // else apply immediately (your existing apply endpoint)
+      
       const res = await fetch("/api/products/bulk-edit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -165,7 +142,7 @@ export default function PriceUpdatePage() {
       }}
       secondaryActions={[
         { content: "Cancel", onAction: () => window.history.back() },
-        // ✅ NEW BUTTON next to Submit/Cancel
+        
         { content: "Price Schedule", onAction: openSchedule },
       ]}
     >
@@ -194,7 +171,7 @@ export default function PriceUpdatePage() {
                 <Button onClick={openSchedule}>Edit schedule</Button>
               </InlineStack>
 
-              {/* Your existing form UI continues here */}
+              
             </BlockStack>
           </Card>
         </Layout.Section>
@@ -204,12 +181,12 @@ export default function PriceUpdatePage() {
             <Text as="h3" variant="headingMd">
               Price Preview
             </Text>
-            {/* your preview UI */}
+        
           </Card>
         </Layout.Section>
       </Layout>
 
-      {/* ✅ Schedule Modal */}
+      
       <Modal
         open={scheduleModalOpen}
         onClose={() => setScheduleModalOpen(false)}
@@ -244,7 +221,7 @@ export default function PriceUpdatePage() {
               <>
                 <Divider />
 
-                {/* FROM */}
+                
                 <InlineStack gap="300" align="start">
                   <div style={{ flex: 1 }}>
                     <Popover
@@ -290,7 +267,7 @@ export default function PriceUpdatePage() {
                   onChange={setRevertEnabled}
                 />
 
-                {/* TO */}
+                
                 {revertEnabled && (
                   <InlineStack gap="300" align="start">
                     <div style={{ flex: 1 }}>

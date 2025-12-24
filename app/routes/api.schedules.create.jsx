@@ -8,63 +8,110 @@ function jsonResponse(data, status = 200) {
   });
 }
 
+function toProductGid(rawId) {
+  if (!rawId) return "";
+  return String(rawId).startsWith("gid://")
+    ? String(rawId)
+    : `gid://shopify/Product/${String(rawId)}`;
+}
+
+function toVariantGid(rawId) {
+  if (!rawId) return "";
+  return String(rawId).startsWith("gid://")
+    ? String(rawId)
+    : `gid://shopify/ProductVariant/${String(rawId)}`;
+}
+
+const GET_VARIANT_PRODUCT = `#graphql
+  query VariantProduct($id: ID!) {
+    productVariant(id: $id) {
+      id
+      product {
+        id
+      }
+    }
+  }
+`;
+
+async function resolveProductIdForVariant(admin, variantId) {
+  const vGid = toVariantGid(variantId);
+
+  const res = await admin.graphql(GET_VARIANT_PRODUCT, {
+    variables: { id: vGid },
+  });
+
+  const json = await res.json();
+  if (json?.errors?.length) {
+    throw new Error(json.errors.map((e) => e.message).join(", "));
+  }
+
+  const pid = json?.data?.productVariant?.product?.id;
+  if (!pid) throw new Error(`Unable to resolve productId for variant ${vGid}`);
+
+  return pid; 
+}
+
 export async function action({ request }) {
-  console.log("🔵 [CREATE] Schedule API called");
-
   try {
-    const { session } = await authenticate.admin(request);
-    console.log("🟢 Authenticated shop:", session?.shop);
-
+    const { admin, session } = await authenticate.admin(request);
     if (request.method !== "POST") {
-      console.log("🔴 Invalid method:", request.method);
       return jsonResponse({ ok: false, error: "Only POST allowed" }, 405);
     }
-
     const body = await request.json().catch(() => null);
-    console.log("📦 Request body:", body);
 
     if (!body) {
-      console.log("🔴 Invalid JSON body");
       return jsonResponse({ ok: false, error: "Invalid JSON" }, 400);
     }
 
     const schedule = body?.schedule;
-    console.log("⏰ Schedule object:", schedule);
-
     if (!schedule || schedule.changeMode !== "later" || !schedule.runAtIso) {
-      console.log("🔴 Schedule validation failed");
-      return jsonResponse(
-        { ok: false, error: "Schedule details missing" },
-        400
-      );
+      return jsonResponse({ ok: false, error: "Schedule details missing" }, 400);
     }
 
     const items = Array.isArray(body?.items) ? body.items : [];
-    console.log("📦 Items count:", items.length);
-    console.log("📦 Items sample:", items[0]);
-
     const itemsValid =
       items.length > 0 &&
       items.every(
-        (i) =>
-          i?.variantId &&
-          i?.newPrice !== undefined &&
-          i?.newPrice !== null
+        (i) => i?.variantId && i?.newPrice !== undefined && i?.newPrice !== null
       );
 
     if (!itemsValid) {
-      console.log("🔴 Items validation failed");
       return jsonResponse(
         { ok: false, error: "items required (variantId + newPrice)" },
         400
       );
     }
 
+    const productIds = Array.isArray(body?.productIds) ? body.productIds : [];
+    const fallbackProductId = productIds?.length === 1 ? toProductGid(productIds[0]) : null;
+
+    const variantToProductCache = new Map();
+
+    body.items = await Promise.all(
+      items.map(async (it) => {
+        if (it.productId) {
+          return { ...it, productId: toProductGid(it.productId), variantId: toVariantGid(it.variantId) };
+        }
+
+        if (fallbackProductId) {
+          return { ...it, productId: fallbackProductId, variantId: toVariantGid(it.variantId) };
+        }
+
+        const vGid = toVariantGid(it.variantId);
+
+        let pid = variantToProductCache.get(vGid);
+        if (!pid) {
+          pid = await resolveProductIdForVariant(admin, vGid);
+          variantToProductCache.set(vGid, pid);
+        }
+
+        return { ...it, productId: pid, variantId: vGid };
+      })
+    );
+
     const runAt = new Date(schedule.runAtIso);
-    console.log("⏰ Parsed runAt (UTC):", runAt.toISOString());
 
     if (Number.isNaN(runAt.getTime())) {
-      console.log("🔴 Invalid runAtIso:", schedule.runAtIso);
       return jsonResponse({ ok: false, error: "Invalid runAtIso" }, 400);
     }
 
@@ -74,33 +121,23 @@ export async function action({ request }) {
         : null;
 
     if (revertAt) {
-      console.log("⏪ Parsed revertAt (UTC):", revertAt.toISOString());
       if (Number.isNaN(revertAt.getTime())) {
-        console.log("🔴 Invalid revertAtIso:", schedule.revertAtIso);
-        return jsonResponse(
-          { ok: false, error: "Invalid revertAtIso" },
-          400
-        );
+        return jsonResponse({ ok: false, error: "Invalid revertAtIso" }, 400);
       }
     }
-
-    console.log("💾 Creating PriceSchedule record…");
-
     const row = await prisma.priceSchedule.create({
       data: {
         shop: session.shop,
         runAt,
         revertAt,
         status: "PENDING",
-        payload: body,
+        payload: body, 
       },
     });
 
-    console.log("✅ Schedule created:", row.id);
 
     return jsonResponse({ ok: true, scheduleId: row.id }, 200);
   } catch (e) {
-    console.error("🔥 CREATE SCHEDULE ERROR:", e);
 
     return jsonResponse(
       {

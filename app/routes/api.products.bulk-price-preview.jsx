@@ -44,7 +44,6 @@ function roundPrice(value, rounding) {
   if (rounding === "nearest_whole") return Math.round(v);
   if (rounding === "down_whole") return Math.floor(v);
 
-  // round up to .99
   if (rounding === "up_99") {
     const whole = Math.floor(v);
     return Number((whole + 0.99).toFixed(2));
@@ -150,7 +149,7 @@ export async function action({ request }) {
           return {
             variantId: v.id,
             variantTitle: v.title,
-            image: variantImage, // may be null
+            image: variantImage, 
             oldPrice: num(v.price, 0),
             newPrice: calcNewPrice({
               oldPrice: v.price,

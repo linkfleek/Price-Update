@@ -17,7 +17,7 @@ import {
   Layout,
   Spinner,
   IndexTable,
-  // ✅ schedule modal imports
+  
   Modal,
   RadioButton,
   Checkbox,
@@ -31,16 +31,16 @@ function money(n) {
   return `$${v.toFixed(2)}`;
 }
 
-// ---------- helpers for schedule ----------
+
 function formatYmd(date) {
-  // YYYY-MM-DD
+  
   const yyyy = date.getFullYear();
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   const dd = String(date.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 }
 function toLocalDatetimeIso(dateObj, timeStr) {
-  // dateObj = Date (date), timeStr = "HH:MM"
+  
   if (!dateObj || !timeStr) return null;
 
   const [hh, mm] = timeStr.split(":").map((n) => Number(n));
@@ -48,14 +48,15 @@ function toLocalDatetimeIso(dateObj, timeStr) {
 
   d.setHours(hh || 0, mm || 0, 0, 0);
 
-  return d.toISOString(); // 👈 THIS LINE
+  return d.toISOString();
 }
 
 export default function BulkEditPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  // ids from URL: ?ids=9197,123
+
+  
   const idsParam = searchParams.get("ids") || "";
   const productIds = useMemo(() => {
     const raw = idsParam
@@ -65,22 +66,22 @@ export default function BulkEditPage() {
     return Array.from(new Set(raw));
   }, [idsParam]);
 
-  // left form
-  const [adjustType, setAdjustType] = useState("decrease"); // decrease | increase
-  const [amountType, setAmountType] = useState("percentage"); // percentage | fixed
+  
+  const [adjustType, setAdjustType] = useState("decrease");
+  const [amountType, setAmountType] = useState("percentage"); 
   const [percentage, setPercentage] = useState(25);
   const [fixedAmount, setFixedAmount] = useState("10");
   const [rounding, setRounding] = useState("none");
 
-  // submit
+ 
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [tone, setTone] = useState("success");
 
-  // preview (right side)
+  
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewErr, setPreviewErr] = useState("");
-  const [previewData, setPreviewData] = useState([]); // [{productId,title,image,variants:[...]}]
+  const [previewData, setPreviewData] = useState([]); 
   const debounceRef = useRef(null);
 
   const helperText = useMemo(() => {
@@ -89,31 +90,27 @@ export default function BulkEditPage() {
     }
     return `${adjustType === "increase" ? "Increase" : "Decrease"} by $${fixedAmount || 0}`;
   }, [amountType, adjustType, percentage, fixedAmount]);
-
-  // =======================
-  // ✅ PRICE SCHEDULE STATE
-  // =======================
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
 
-  // "now" or "later"
+  
   const [changeMode, setChangeMode] = useState("now");
   const [revertEnabled, setRevertEnabled] = useState(false);
 
-  // FROM date/time
+ 
   const [fromPopoverOpen, setFromPopoverOpen] = useState(false);
   const [fromDate, setFromDate] = useState(new Date());
   const [fromMonth, setFromMonth] = useState(fromDate.getMonth());
   const [fromYear, setFromYear] = useState(fromDate.getFullYear());
   const [fromTime, setFromTime] = useState("12:00");
 
-  // TO date/time
+  
   const [toPopoverOpen, setToPopoverOpen] = useState(false);
   const [toDate, setToDate] = useState(new Date());
   const [toMonth, setToMonth] = useState(toDate.getMonth());
   const [toYear, setToYear] = useState(toDate.getFullYear());
   const [toTime, setToTime] = useState("12:00");
 
-  // Saved schedule snapshot (used on Submit)
+
   const [savedSchedule, setSavedSchedule] = useState(null);
 
   const scheduleSummary = useMemo(() => {
@@ -151,7 +148,7 @@ export default function BulkEditPage() {
         changeMode === "later" && revertEnabled ? toLocalDatetimeIso(toDate, toTime) : null,
     };
 
-    // basic validations
+   
     if (snapshot.changeMode === "later" && !snapshot.runAtIso) {
       setTone("critical");
       setMsg("Please select a valid From date/time.");
@@ -163,7 +160,7 @@ export default function BulkEditPage() {
       return;
     }
 
-    // OPTIONAL: ensure To > From when revert enabled
+   
     if (snapshot.changeMode === "later" && snapshot.revertEnabled) {
       const a = new Date(snapshot.runAtIso).getTime();
       const b = new Date(snapshot.revertAtIso).getTime();
@@ -181,7 +178,7 @@ export default function BulkEditPage() {
     setMsg(`Schedule saved: ${snapshot.changeMode === "now" ? "Now" : "Later"}`);
   }, [changeMode, revertEnabled, fromDate, fromTime, toDate, toTime]);
 
-  // -------- Preview loader (debounced) --------
+  
   useEffect(() => {
     if (!productIds.length) return;
 
@@ -226,9 +223,6 @@ export default function BulkEditPage() {
   }, [productIds, adjustType, amountType, percentage, fixedAmount, rounding]);
 
 
-
-
-  // -------- Flatten preview for table --------
   const flatRows = useMemo(() => {
     const rows = [];
 
@@ -266,7 +260,7 @@ export default function BulkEditPage() {
     return { oldTotal, newTotal, diff };
   }, [flatRows]);
 
-  // -------- Submit (actual update OR schedule) --------
+  
 const onSubmit = useCallback(async () => {
   if (!productIds.length) return;
 
@@ -274,17 +268,17 @@ const onSubmit = useCallback(async () => {
   setMsg("");
 
   try {
-    // ✅ Build items from previewData (required for scheduling)
+    
     const items = [];
     for (const p of previewData || []) {
       for (const v of p?.variants || []) {
-        const variantId = v?.variantId;      // must be gid://shopify/ProductVariant/...
+        const variantId = v?.variantId;      
         const newPrice = v?.newPrice;
 
         if (!variantId || newPrice == null) continue;
 
         items.push({
-          productId: p?.productId || null,  // optional but useful
+          productId: p?.productId || null, 
           variantId,
           newPrice: String(newPrice),
           oldPrice: v?.oldPrice != null ? String(v.oldPrice) : null,
@@ -299,8 +293,8 @@ const onSubmit = useCallback(async () => {
       percentage: amountType === "percentage" ? Number(percentage) : null,
       fixedAmount: amountType === "fixed" ? Number(fixedAmount || 0) : null,
       rounding,
-      schedule: savedSchedule, // ✅ attach schedule
- // ✅ add items for schedule execution
+      schedule: savedSchedule, 
+ 
       items: flatRows.map(r => ({
         variantId: r.variantId,
         newPrice: String(r.newPrice),
@@ -308,9 +302,9 @@ const onSubmit = useCallback(async () => {
       })),
         };
 
-    // ✅ If scheduled
+    
     if (savedSchedule?.changeMode === "later") {
-      // Guard: prevent scheduling if items missing
+      
       if (!items.length) {
         setTone("critical");
         setMsg("items required (variantId + newPrice). Preview data missing variantId/newPrice.");
@@ -338,7 +332,7 @@ const onSubmit = useCallback(async () => {
       return;
     }
 
-    // ✅ Otherwise apply immediately
+    
     const res = await fetch("/api/products/bulk-price-adjust", {
       method: "POST",
       credentials: "include",
@@ -367,10 +361,10 @@ const onSubmit = useCallback(async () => {
   fixedAmount,
   rounding,
   savedSchedule,
-  previewData, // ✅ IMPORTANT dependency
+  previewData, 
 ]);
 
-  // Guard message if no ids
+  
   useEffect(() => {
     if (!productIds.length) {
       setTone("critical");
@@ -388,7 +382,7 @@ const onSubmit = useCallback(async () => {
         loading: busy,
         disabled: !productIds.length,
       }}
-      // ✅ Price Schedule beside Cancel (left of it)
+      
       secondaryActions={[
         { content: "Price Schedule", onAction: openSchedule, disabled: busy },
         { content: "Cancel", onAction: () => navigate(-1), disabled: busy },
@@ -403,19 +397,31 @@ const onSubmit = useCallback(async () => {
       ) : null}
 
       <Layout>
-        {/* LEFT CARD */}
+        
         <Layout.Section>
           <Card>
             <Box padding="400">
               <Box paddingBlockStart="100">
-                <InlineStack align="space-between">
-                  <Text as="p" tone="subdued">
-                    Schedule: <b>{scheduleSummary}</b>
-                  </Text>
-                  <Button onClick={openSchedule} disabled={busy}>
-                    Edit schedule
-                  </Button>
-                </InlineStack>
+               <InlineStack align="space-between">
+  <Text as="p" tone="subdued">
+    Schedule: <b>{scheduleSummary}</b>
+  </Text>
+
+  <InlineStack gap="200">
+    <Button onClick={openSchedule} disabled={busy}>
+      Edit schedule
+    </Button>
+
+   
+    <Button
+      onClick={() => navigate("/app/schedules/list")}
+      variant="secondary"
+    >
+      Schedule List
+    </Button>
+  </InlineStack>
+</InlineStack>
+
               </Box>
 
               <Box paddingBlockStart="400">
@@ -536,7 +542,7 @@ const onSubmit = useCallback(async () => {
           </Card>
         </Layout.Section>
 
-        {/* RIGHT PREVIEW CARD */}
+        
         <Layout.Section variant="oneThird">
           <Card>
             <Box padding="400">
@@ -640,9 +646,6 @@ const onSubmit = useCallback(async () => {
         </Layout.Section>
       </Layout>
 
-      {/* =======================
-          ✅ PRICE SCHEDULE MODAL
-         ======================= */}
       <Modal
         open={scheduleModalOpen}
         onClose={closeSchedule}
@@ -678,7 +681,7 @@ const onSubmit = useCallback(async () => {
             <Box paddingBlockStart="400">
               <Divider />
 
-              {/* FROM */}
+
               <Box paddingBlockStart="400">
                 <InlineStack gap="300" align="start">
                   <div style={{ flex: 1 }}>
@@ -719,7 +722,7 @@ const onSubmit = useCallback(async () => {
                 </InlineStack>
               </Box>
 
-              {/* REVERT */}
+              
               <Box paddingBlockStart="300">
                 <Checkbox
                   label="Revert to original prices later?"
@@ -728,7 +731,7 @@ const onSubmit = useCallback(async () => {
                 />
               </Box>
 
-              {/* TO */}
+              
               {revertEnabled ? (
                 <Box paddingBlockStart="300">
                   <InlineStack gap="300" align="start">

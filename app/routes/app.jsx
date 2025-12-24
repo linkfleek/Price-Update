@@ -10,7 +10,7 @@ import { useEffect } from "react";
 export const loader = async ({ request }) => {
   await authenticate.admin(request);
 
-  // eslint-disable-next-line no-undef
+  
   return { apiKey: process.env.SHOPIFY_API_KEY || "" };
 };
 
@@ -22,7 +22,7 @@ export default function App() {
         method: "POST",
         credentials: "include",
       }).catch(() => {});
-    }, 30000); // every 30 seconds
+    }, 30000); 
 
     return () => clearInterval(timer);
   }, []);
@@ -33,7 +33,8 @@ export default function App() {
     <s-app-nav>
       <s-link href="/app">Home</s-link>
       <s-link href="/app/products">Products</s-link>
-      <s-link href="/app/inventory">Inventory</s-link> 
+      <s-link href="/app/inventory">Inventory</s-link>
+      <s-link href="/app/pricing">Pricing</s-link>
     </s-app-nav>
     <Outlet />
   </PolarisProvider>
@@ -42,7 +43,6 @@ export default function App() {
   );
 }
 
-// Shopify needs React Router to catch some thrown responses, so that their headers are included in the response.
 export function ErrorBoundary() {
   return boundary.error(useRouteError());
 }

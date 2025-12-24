@@ -11,10 +11,8 @@ const GET_PRODUCTS = `#graphql
         status
         totalInventory
 
-        # ✅ Needed to detect if variants are created or not (refresh persistence)
         hasOnlyDefaultVariant
 
-        # ✅ Needed to detect if "Type" option exists (refresh persistence)
         options {
           name
           values

@@ -1,4 +1,3 @@
-// app/routes/api.inventory.locations.jsx
 import { authenticate } from "../shopify.server";
 
 export async function loader({ request }) {
@@ -26,7 +25,6 @@ export async function loader({ request }) {
       { headers: { "Content-Type": "application/json" } }
     );
   } catch (e) {
-    console.error("❌ Location fetch failed", e);
     return new Response(
       JSON.stringify({ ok: false, error: "Failed to load locations" }),
       { status: 500, headers: { "Content-Type": "application/json" } }

@@ -1,71 +1,30 @@
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 
-/**
- * Runs pending schedules:
- * - Finds PENDING schedules where runAt <= now
- * - For each schedule, fetch products/variants
- * - Computes new price based on payload (percentage/fixed + rounding)
- * - Updates variant prices via Shopify Admin GraphQL
- */
-const GET_PRODUCT_VARIANTS = `#graphql
-  query GetProductVariants($id: ID!) {
-    product(id: $id) {
-      id
-      variants(first: 100) {
-        nodes {
-          id
-          price
-          compareAtPrice
-        }
-      }
-    }
-  }
-`;
 
-const VARIANT_UPDATE = `#graphql
-  mutation UpdateVariant($input: ProductVariantInput!) {
-    productVariantUpdate(input: $input) {
-      productVariant {
+const PRODUCT_VARIANTS_BULK_UPDATE = `#graphql
+  mutation ProductVariantsBulkUpdate(
+    $productId: ID!,
+    $variants: [ProductVariantsBulkInput!]!
+  ) {
+    productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+      productVariants {
         id
         price
-        compareAtPrice
       }
-      userErrors { field message }
+      userErrors {
+        field
+        message
+      }
     }
   }
 `;
 
-function num(val, fallback = 0) {
-  const n = Number(val);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function roundPrice(value, rounding) {
-  const v = num(value, 0);
-  if (rounding === "none") return Number(v.toFixed(2));
-  if (rounding === "nearest_whole") return Math.round(v);
-  if (rounding === "down_whole") return Math.floor(v);
-  if (rounding === "up_99") return Math.floor(v) + 0.99;
-  return Number(v.toFixed(2));
-}
-
-function computeNewPrice(oldPrice, payload) {
-  const { adjustType, amountType, percentage, fixedAmount, rounding } = payload;
-
-  let next = num(oldPrice, 0);
-
-  if (amountType === "percentage") {
-    const pct = num(percentage, 0) / 100;
-    const delta = next * pct;
-    next = adjustType === "increase" ? next + delta : next - delta;
-  } else {
-    const amt = num(fixedAmount, 0);
-    next = adjustType === "increase" ? next + amt : next - amt;
-  }
-
-  if (next < 0) next = 0;
-  return roundPrice(next, rounding);
+function toProductGid(id) {
+  if (!id) return "";
+  return String(id).startsWith("gid://")
+    ? String(id)
+    : `gid://shopify/Product/${String(id)}`;
 }
 
 export async function action({ request }) {
@@ -80,7 +39,7 @@ export async function action({ request }) {
 
   const now = new Date();
 
-  const due = await prisma.priceSchedule.findMany({
+  const dueSchedules = await prisma.priceSchedule.findMany({
     where: {
       shop: session.shop,
       status: "PENDING",
@@ -92,42 +51,63 @@ export async function action({ request }) {
 
   const results = [];
 
-  for (const s of due) {
+  for (const s of dueSchedules) {
     try {
-      // lock schedule
       await prisma.priceSchedule.update({
         where: { id: s.id },
         data: { status: "RUNNING", error: null },
       });
 
       const payload = s.payload || {};
-      const productIds = Array.isArray(payload.productIds) ? payload.productIds : [];
+      const items = Array.isArray(payload.items) ? payload.items : [];
 
-      if (!productIds.length) throw new Error("No productIds in payload");
-
-      // Update each product's variants
-      for (const pid of productIds) {
-        const gid = String(pid).startsWith("gid://") ? String(pid) : `gid://shopify/Product/${pid}`;
-
-        const prodRes = await admin.graphql(GET_PRODUCT_VARIANTS, { variables: { id: gid } });
-        const prodJson = await prodRes.json();
-        const variants = prodJson?.data?.product?.variants?.nodes || [];
-
-        for (const v of variants) {
-          const oldPrice = num(v.price, 0);
-          const newPrice = computeNewPrice(oldPrice, payload);
-
-          const upRes = await admin.graphql(VARIANT_UPDATE, {
-            variables: { input: { id: v.id, price: String(newPrice) } },
-          });
-          const upJson = await upRes.json();
-          const errs = upJson?.data?.productVariantUpdate?.userErrors || [];
-          if (errs.length) {
-            throw new Error(`Variant update error: ${errs.map(e => e.message).join(", ")}`);
-          }
-        }
+      if (!items.length) {
+        throw new Error("No items found in schedule payload");
       }
 
+      const grouped = new Map(); 
+
+      for (const it of items) {
+        const productId = it.productId || it.productGid || it.pid; 
+        const variantId = it.variantId;
+        const newPrice = it.newPrice;
+
+        if (!productId) throw new Error("Item missing productId");
+        if (!variantId) throw new Error("Item missing variantId");
+        if (newPrice === undefined || newPrice === null || newPrice === "")
+          throw new Error("Item missing newPrice");
+
+        const pGid = toProductGid(productId);
+
+        if (!grouped.has(pGid)) grouped.set(pGid, []);
+
+        grouped.get(pGid).push({
+          id: String(variantId),          
+          price: String(newPrice),        
+        });
+      }
+
+      
+      for (const [productIdGid, variants] of grouped.entries()) {
+        const res = await admin.graphql(PRODUCT_VARIANTS_BULK_UPDATE, {
+          variables: {
+            productId: productIdGid,
+            variants,
+          },
+        });
+
+        const json = await res.json();
+
+       
+        if (json?.errors?.length) {
+          throw new Error(json.errors.map((e) => e.message).join(", "));
+        }
+
+        const userErrors = json?.data?.productVariantsBulkUpdate?.userErrors || [];
+        if (userErrors.length) {
+          throw new Error(userErrors.map((e) => e.message).join(", "));
+        }
+      }
       await prisma.priceSchedule.update({
         where: { id: s.id },
         data: { status: "DONE" },
@@ -139,11 +119,27 @@ export async function action({ request }) {
         where: { id: s.id },
         data: { status: "FAILED", error: String(e?.message || e) },
       });
-      results.push({ id: s.id, ok: false, error: String(e?.message || e) });
+
+      results.push({
+        id: s.id,
+        ok: false,
+        error: String(e?.message || e),
+      });
     }
   }
 
-  return new Response(JSON.stringify({ ok: true, now, processed: results }), {
-    headers: { "Content-Type": "application/json" },
-  });
+  return new Response(
+    JSON.stringify(
+      {
+        ok: true,
+        now: now.toISOString(),
+        processed: results,
+      },
+      null,
+      2
+    ),
+    {
+      headers: { "Content-Type": "application/json" },
+    }
+  );
 }
